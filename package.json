@@ -1,0 +1,26 @@
+{
+  "name": "tubes-rpll",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace apps/web\" \"npm run dev --workspace apps/api\"",
+    "dev:web": "npm run dev --workspace apps/web",
+    "dev:api": "npm run dev --workspace apps/api",
+    "build": "npm run build --workspaces --if-present",
+    "start": "npm run start --workspace apps/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  },
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "pg": "^8.20.0",
+    "pg-hstore": "^2.3.4",
+    "sequelize": "^6.37.8",
+    "sequelize-cli": "^6.6.5"
+  }
+}
