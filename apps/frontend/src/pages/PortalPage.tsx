@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import { auth } from '../services/auth';
+import { attendanceApi, type AdminAttendanceQrCode } from '../services/attendance';
+import { AttendanceScanner } from '../components/AttendanceScanner';
 import { leavesApi, type LeaveRequest, type LeaveType } from '../services/leaves';
 import { profileApi } from '../services/profile';
 import { reimbursementsApi, type ReimbursementRequest } from '../services/reimbursements';
@@ -26,7 +29,11 @@ interface PortalPageProps {
   onEmployeeUpdate: (employee: SessionUser['employee']) => void;
 }
 
-type PortalMenu = 'overview' | 'profile' | 'leave' | 'reimburse' | 'users';
+type PortalMenu = 'overview' | 'profile' | 'leave' | 'reimburse' | 'users' | 'attendance-qr' | 'attendance-scan';
+
+interface AttendanceQrView extends AdminAttendanceQrCode {
+  qrDataUrl: string;
+}
 
 const monthFormatter = new Intl.DateTimeFormat('id-ID', {
   month: 'long',
@@ -52,6 +59,8 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
       ? 'Manager'
       : 'Staff';
   const canManageUsers = currentUser.user.role === 'admin';
+  const canManageAttendanceQr = currentUser.user.role === 'admin';
+  const canScanAttendance = currentUser.user.role === 'staff' || currentUser.user.role === 'manager';
   const employeeName = currentUser.employee?.full_name || 'User';
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -71,6 +80,9 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
   const [reimbursementSubmitLoading, setReimbursementSubmitLoading] = useState(false);
   const [reimbursementError, setReimbursementError] = useState('');
   const [reimbursementMessage, setReimbursementMessage] = useState('');
+  const [attendanceQr, setAttendanceQr] = useState<AttendanceQrView | null>(null);
+  const [attendanceQrLoading, setAttendanceQrLoading] = useState(false);
+  const [attendanceQrError, setAttendanceQrError] = useState('');
   const [activeMenu, setActiveMenu] = useState<PortalMenu>('overview');
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const now = new Date();
@@ -131,8 +143,16 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
       menus.push({ id: 'users', label: 'User Management' });
     }
 
+    if (canManageAttendanceQr) {
+      menus.push({ id: 'attendance-qr', label: 'Attendance QR' });
+    }
+
+    if (canScanAttendance) {
+      menus.push({ id: 'attendance-scan', label: 'Scan QR' });
+    }
+
     return menus;
-  }, [canManageUsers]);
+  }, [canManageUsers, canManageAttendanceQr, canScanAttendance]);
 
   const calendarDays = useMemo(() => {
     const year = calendarMonth.getFullYear();
@@ -311,6 +331,52 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
   useEffect(() => {
     void loadReimbursements();
   }, [token]);
+
+  const loadAttendanceQr = async (forceRefresh = false) => {
+    if (!canManageAttendanceQr || !token) {
+      return;
+    }
+
+    try {
+      setAttendanceQrLoading(true);
+      setAttendanceQrError('');
+      const result = await attendanceApi.getAdminQrCode(token, forceRefresh);
+
+      if (!result || !result.token) {
+        throw new Error('Data QR tidak lengkap dari server');
+      }
+
+      let qrDataUrl = '';
+      try {
+        qrDataUrl = await QRCode.toDataURL(result.token, {
+          width: 260,
+          margin: 1,
+          errorCorrectionLevel: 'M',
+        });
+      } catch (genErr) {
+        console.error('QR generation failed', genErr);
+        throw new Error('Gagal membuat gambar QR');
+      }
+
+      setAttendanceQr({
+        ...result,
+        qrDataUrl,
+      });
+    } catch (err) {
+      console.error('loadAttendanceQr error', err);
+      setAttendanceQrError(err instanceof Error ? err.message : 'Gagal memuat QR absensi');
+    } finally {
+      setAttendanceQrLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeMenu !== 'attendance-qr' || !canManageAttendanceQr || !token) {
+      return;
+    }
+
+    void loadAttendanceQr();
+  }, [activeMenu, canManageAttendanceQr, token]);
 
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -544,6 +610,10 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
 
   const goToNextMonth = () => {
     setCalendarMonth((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1));
+  };
+
+  const handleRefreshAttendanceQr = async () => {
+    await loadAttendanceQr(true);
   };
 
   return (
@@ -950,6 +1020,56 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
             })
           )}
         </div>
+      </section>
+      )}
+
+      {activeMenu === 'attendance-qr' && canManageAttendanceQr && (
+      <section className="panel attendance-panel">
+        <div className="section-head">
+          <div>
+            <h3>Attendance QR</h3>
+            <p className="subtext">QR hari ini untuk absensi masuk. Klik Refresh QR untuk membuat kode baru.</p>
+          </div>
+          <button type="button" onClick={handleRefreshAttendanceQr} disabled={attendanceQrLoading}>
+            {attendanceQrLoading ? 'Memuat...' : 'Refresh QR'}
+          </button>
+        </div>
+
+        {attendanceQrError && <div className="alert-error">{attendanceQrError}</div>}
+
+        {attendanceQr ? (
+          <div className="qr-layout">
+            <div className="qr-card">
+              <img
+                className="qr-code-image"
+                src={attendanceQr.qrDataUrl}
+                alt="QR code absensi"
+              />
+              <div className="qr-card-meta">
+                <span className="qr-card-pill">Hari ini</span>
+                <strong>{attendanceQr.valid_for_date}</strong>
+              </div>
+              <p className="subtext qr-card-note">QR akan berganti saat Anda menekan Refresh QR.</p>
+            </div>
+          </div>
+        ) : (
+          !attendanceQrLoading && !attendanceQrError && (
+            <p className="subtext">Belum ada QR code yang dimuat.</p>
+          )
+        )}
+      </section>
+      )}
+
+      {activeMenu === 'attendance-scan' && canScanAttendance && (
+      <section className="panel scanner-panel">
+        <div className="section-head">
+          <div>
+            <h3>Scan QR Absensi</h3>
+            <p className="subtext">Scan QR absensi yang ditampilkan admin untuk mencatat kehadiran Anda.</p>
+          </div>
+        </div>
+
+        {token && <AttendanceScanner token={token} />}
       </section>
       )}
 
