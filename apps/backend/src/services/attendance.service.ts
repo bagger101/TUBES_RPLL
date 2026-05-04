@@ -4,18 +4,14 @@ import {
   sequelize,
   Attendance,
   Employee,
-  EmployeeSchedule,
   QrToken,
-  WorkSchedule,
   User,
 } from '../models/index';
 import { AppError, NotFoundError, ValidationError } from '../utils/errors';
 import {
   getNowInJakarta,
-  getTodayInJakarta,
-  isAfter6PM,
-  isAfter7AM,
-  isWithin6to10AM,
+  getAttendanceDateInJakarta,
+  isAfter10AM,
 } from '../utils/timezone';
 
 type QrTokenRecord = {
@@ -30,13 +26,8 @@ type QrTokenRecord = {
 
 class AttendanceService {
   static async getAdminQrCode(actorId: string, forceRefresh = false) {
-    const today = getTodayInJakarta();
     const now = getNowInJakarta();
-
-    // Feature: QR only available between 06:00 AM - 10:00 AM
-    if (!isWithin6to10AM()) {
-      throw new AppError('QR code hanya dapat di-generate antara jam 06:00 - 10:00 WIB pagi', 403, 'QR_OUTSIDE_ALLOWED_HOURS');
-    }
+    const today = getAttendanceDateInJakarta(now);
 
     if (forceRefresh) {
       await QrToken.update(
@@ -97,13 +88,8 @@ class AttendanceService {
       throw new ValidationError('QR token wajib diisi');
     }
 
-    // Check for 6 PM cutoff - max absence at 6 PM
-    if (isAfter6PM()) {
-      throw new AppError('Absensi tutup setelah jam 6 sore, silakan absen hari berikutnya', 403, 'ATTENDANCE_CLOSED_FOR_DAY');
-    }
-
-    const today = getTodayInJakarta();
     const now = getNowInJakarta();
+    const today = getAttendanceDateInJakarta(now);
     const transaction = await sequelize.transaction();
 
     try {
@@ -162,38 +148,8 @@ class AttendanceService {
         throw new AppError('Absensi hari ini sudah dicatat', 409, 'ATTENDANCE_ALREADY_RECORDED');
       }
 
-      // Calculate late minutes
-      let lateMinutes = 0;
-
-      // Get schedule assignment
-      const scheduleAssignment = await EmployeeSchedule.findOne({
-        where: {
-          employee_id: employee.getDataValue('id'),
-          effective_date: { [Op.lte]: today },
-        },
-        include: [
-          {
-            model: WorkSchedule,
-            as: 'workSchedule',
-          },
-        ],
-        order: [['effective_date', 'DESC']],
-        transaction,
-      }) as any;
-
-      if (scheduleAssignment?.workSchedule) {
-        lateMinutes = scheduleAssignment.workSchedule.calcLateMinutes(now, today);
-      }
-
-      // Feature: If after 7 AM, apply minimum penalty starting from 7:01 AM
-      if (isAfter7AM()) {
-        const today7AM = new Date(`${today}T07:00:00`);
-        const minutesAfter7AM = Math.floor((now.getTime() - today7AM.getTime()) / 60000);
-        // Ensure at least 1 minute late is recorded if after 7:01 AM
-        if (minutesAfter7AM > 0) {
-          lateMinutes = Math.max(lateMinutes, minutesAfter7AM);
-        }
-      }
+      const attendanceStart = new Date(`${today}T10:00:00`);
+      const lateMinutes = Math.max(0, Math.floor((now.getTime() - attendanceStart.getTime()) / 60000));
 
       const status = lateMinutes > 0 ? 'late' : 'present';
 
