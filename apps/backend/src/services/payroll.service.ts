@@ -272,7 +272,24 @@ class PayrollService {
       order: [['created_at', 'ASC']],
     });
 
-    return { period, payslips };
+    // For draft periods, add calculated auto items to each payslip
+    const result = payslips.map((ps: any) => {
+      const plain = ps.toJSON();
+      return plain;
+    });
+
+    if (period.getDataValue('status') === 'draft') {
+      const { start, end } = monthRange(period.getDataValue('year'), period.getDataValue('month'));
+      const workingDays = Math.max(1, countWorkingDays(start, end));
+
+      for (const plain of result) {
+        const calculatedAutoItems = await this.calculateAutoItems(plain.employee_id, start, end, workingDays);
+        if (!plain.items) plain.items = [];
+        plain.items = [...(plain.items || []), ...calculatedAutoItems];
+      }
+    }
+
+    return { period: period.toJSON(), payslips: result };
   }
 
   static async getPayslipDetail(payslipId: string) {
@@ -287,7 +304,17 @@ class PayrollService {
     if (!payslip) throw new NotFoundError('Payslip tidak ditemukan');
 
     const plain = payslip.toJSON() as any;
-    const items = plain.items || [];
+    let items = plain.items || [];
+
+    // For draft periods, add calculated auto items
+    if (plain.period && plain.period.status === 'draft') {
+      const period = plain.period;
+      const { start, end } = monthRange(period.year, period.month);
+      const workingDays = Math.max(1, countWorkingDays(start, end));
+      const calculatedAutoItems = await this.calculateAutoItems(plain.employee_id, start, end, workingDays);
+      items = items.concat(calculatedAutoItems);
+    }
+
     const totals = summarizePayrollItems(items);
 
     return {
@@ -626,7 +653,46 @@ class PayrollService {
       throw new ValidationError('Generate payslip terlebih dahulu sebelum finalize');
     }
 
-    await period.update({ status: 'finalized', finalized_at: new Date() });
+    await sequelize.transaction(async (t: any) => {
+      // Before finalizing, permanently store all calculated auto items
+      const { start, end } = monthRange(period.getDataValue('year'), period.getDataValue('month'));
+      const workingDays = Math.max(1, countWorkingDays(start, end));
+
+      const payslips = await Payslip.findAll({ where: { period_id: periodId }, transaction: t });
+      for (const ps of payslips as any[]) {
+        const empId = ps.getDataValue('employee_id');
+        const psId = ps.getDataValue('id');
+
+        // Calculate and store auto items that don't exist yet
+        const calculatedItems = await this.calculateAutoItems(empId, start, end, workingDays);
+        for (const calcItem of calculatedItems) {
+          // Check if similar item already exists
+          const existing = await PayrollItem.findOne({
+            where: { payslip_id: psId, source: calcItem.source, type: calcItem.type },
+            transaction: t,
+          });
+          if (!existing && calcItem.amount > 0) {
+            await PayrollItem.create({
+              payslip_id: psId,
+              type: calcItem.type,
+              source: calcItem.source,
+              amount: calcItem.amount,
+              description: calcItem.description,
+              ref_id: calcItem.ref_id || null,
+              ref_type: calcItem.ref_type || null,
+              created_by: 'system',
+            }, { transaction: t });
+          }
+        }
+
+        // Recalculate totals
+        await this.recalculatePayslipTotals(psId, t);
+      }
+
+      // Now finalize the period
+      await period.update({ status: 'finalized', finalized_at: new Date() }, { transaction: t });
+    });
+
     return period;
   }
 
@@ -679,6 +745,89 @@ class PayrollService {
     }
 
     return employee.id;
+  }
+
+  // Calculate auto items dynamically for a payslip (reimbursements, unpaid leaves, late penalties)
+  private static async calculateAutoItems(employeeId: string, start: Date, end: Date, workingDays: number) {
+    const items: any[] = [];
+    const baseSalary = (await Employee.findByPk(employeeId, { attributes: ['base_salary'], raw: true }) as any)?.base_salary || 0;
+    const perDay = Number(baseSalary) / workingDays;
+
+    // -- Reimbursements (approved, regardless of payroll_item_id status)
+    // This ensures we include reimbursements even if they were previously processed
+    const reimbursements = await Reimbursement.findAll({
+      where: {
+        employee_id: employeeId,
+        status: 'approved',
+        expense_date: { [Op.between]: [start, end] },
+      },
+      raw: true,
+    });
+
+    for (const r of reimbursements as any[]) {
+      items.push({
+        type: 'reimburse',
+        source: 'auto_reimburse',
+        amount: Number(r.amount),
+        description: `Auto reimburse: ${r.category}`,
+        ref_id: r.id,
+        ref_type: 'Reimbursement',
+      });
+    }
+
+    // -- Unpaid Leave Deductions
+    const leaveRequests = await LeaveRequest.findAll({
+      where: {
+        employee_id: employeeId,
+        status: 'approved',
+        start_date: { [Op.lte]: end },
+        end_date: { [Op.gte]: start },
+      },
+      include: [{ model: LeaveType, as: 'leaveType' }],
+      raw: true,
+      nest: true,
+    });
+
+    for (const lr of leaveRequests as any[]) {
+      if (lr.leaveType && lr.leaveType.is_paid === false) {
+        const days = overlapWorkingDays(lr.start_date, lr.end_date, start, end);
+        const amount = days * perDay;
+        if (amount > 0) {
+          items.push({
+            type: 'penalty',
+            source: 'auto_leave',
+            amount,
+            description: `Unpaid leave deduction (${days} days)`,
+            ref_id: lr.id,
+            ref_type: 'LeaveRequest',
+          });
+        }
+      }
+    }
+
+    // -- Late Penalties
+    const attendances = await Attendance.findAll({
+      where: {
+        employee_id: employeeId,
+        status: 'late',
+        date: { [Op.between]: [start, end] },
+      },
+      raw: true,
+    });
+
+    const lateDays = attendances.length;
+    const latePenalty = lateDays * 50000;
+
+    if (latePenalty > 0) {
+      items.push({
+        type: 'penalty',
+        source: 'auto_late',
+        amount: latePenalty,
+        description: `Late penalty (${lateDays} days @ Rp 50.000/day)`,
+      });
+    }
+
+    return items;
   }
 }
 
