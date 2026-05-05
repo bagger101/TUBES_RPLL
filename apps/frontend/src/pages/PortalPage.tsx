@@ -55,6 +55,18 @@ function isDateWithinRange(dateKey: string, startDate: string, endDate: string) 
   return dateKey >= startDate && dateKey <= endDate;
 }
 
+function normalizePhoneValue(phone: string) {
+  let normalizedPhone = phone.trim().replace(/\s/g, '');
+
+  if (normalizedPhone.startsWith('+62')) {
+    normalizedPhone = '0' + normalizedPhone.slice(3);
+  } else if (normalizedPhone.startsWith('62') && !normalizedPhone.startsWith('0')) {
+    normalizedPhone = '0' + normalizedPhone.slice(2);
+  }
+
+  return normalizedPhone;
+}
+
 // Maximum allowed file size for uploads (5 MB)
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
@@ -289,7 +301,7 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
   const handlePhotoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
 
-    setProfileForm((prev) => ({ ...prev, photo_file: file }));
+    setProfileForm((prev) => ({ ...prev, photo_file: file, photo_deleted: false }));
 
     if (photoPreviewUrl) {
       try { URL.revokeObjectURL(photoPreviewUrl); } catch {}
@@ -429,6 +441,23 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
       .filter((request) => request.status === 'approved')
       .reduce((sum, request) => sum + Number(request.amount || 0), 0),
   }), [reimbursementRequests]);
+
+  const profileIsDirty = useMemo(() => {
+    if (!currentUser.employee) return false;
+
+    const currentPhone = normalizePhoneValue(currentUser.employee.phone || '');
+    const draftPhone = normalizePhoneValue(profileForm.phone || '');
+    const hasExistingPhoto = Boolean(currentUser.employee.photo_url);
+    const photoRemoved = hasExistingPhoto && profileForm.photo_deleted;
+
+    return (
+      profileForm.full_name.trim() !== (currentUser.employee.full_name || '').trim()
+      || draftPhone !== currentPhone
+      || profileForm.address.trim() !== (currentUser.employee.address || '').trim()
+      || Boolean(profileForm.photo_file)
+      || photoRemoved
+    );
+  }, [currentUser.employee, profileForm.address, profileForm.full_name, profileForm.phone, profileForm.photo_deleted, profileForm.photo_file]);
 
   const resetForm = () => {
     setForm({
@@ -836,12 +865,7 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
       return;
     }
     // Normalisasi nomor telepon dulu, lalu validasi panjang digitnya
-    let normalizedPhone = profileForm.phone.trim().replace(/\s/g, '');
-    if (normalizedPhone.startsWith('+62')) {
-      normalizedPhone = '0' + normalizedPhone.slice(3);
-    } else if (normalizedPhone.startsWith('62') && !normalizedPhone.startsWith('0')) {
-      normalizedPhone = '0' + normalizedPhone.slice(2);
-    }
+    const normalizedPhone = normalizePhoneValue(profileForm.phone);
 
     const phoneDigitsOnly = normalizedPhone.replace(/\D/g, '');
     if (phoneDigitsOnly.length < 10) {
@@ -858,11 +882,16 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
       return;
     }
 
-      // Validasi ukuran file foto (jika ada)
-      if (profileForm.photo_file && profileForm.photo_file.size > MAX_FILE_SIZE) {
-        setProfileError('Ukuran foto maksimal 5MB');
-        return;
-      }
+    // Validasi ukuran file foto (jika ada)
+    if (profileForm.photo_file && profileForm.photo_file.size > MAX_FILE_SIZE) {
+      setProfileError('Ukuran foto maksimal 5MB');
+      return;
+    }
+
+    if (!profileIsDirty) {
+      setProfileError('Tidak ada perubahan pada profile');
+      return;
+    }
 
     try {
       setProfileLoading(true);
@@ -1363,7 +1392,7 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
                   placeholder="Nama lengkap"
                   required
                   minLength={3}
-                  maxLength={100}
+                  maxLength={50}
                   disabled={profileLoading}
                 />
               </div>
@@ -1375,8 +1404,9 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
                   placeholder="Contoh: 081234567890 (minimal 10 digit)"
                   required
                   minLength={10}
-                  maxLength={20}
+                  maxLength={14}
                   disabled={profileLoading}
+                  pattern="^\d{10,}$"
                 />
               </div>
             </div>
@@ -1418,7 +1448,7 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
             </div>
 
             <div className="form-actions compact-actions">
-              <button type="submit" disabled={profileLoading} className="primary-btn">
+              <button type="submit" disabled={profileLoading || !profileIsDirty} className="primary-btn">
                 {profileLoading ? 'Menyimpan...' : 'Simpan Profile'}
               </button>
             </div>
@@ -1497,6 +1527,7 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
                   minLength={3}
                   maxLength={300}
                   disabled={leaveSubmitLoading}
+                  pattern="^[a-zA-Z\s\-_]+$"
                 />
               </div>
             </div>
@@ -1657,10 +1688,13 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
                 <label>Deskripsi</label>
                 <input
                   value={reimbursementForm.description}
+                  //input ga boleh berupa angka
+                  pattern="^[a-zA-Z\s\-_]+$"
                   onChange={(e) => setReimbursementForm((prev) => ({ ...prev, description: e.target.value }))}
                   placeholder="Contoh: Transport meeting client"
                   disabled={reimbursementSubmitLoading}
                   maxLength={50}
+                  
                 />
               </div>
               <div className="form-group">
@@ -2107,6 +2141,7 @@ export function PortalPage({ currentUser, onLogout, onEmployeeUpdate }: PortalPa
                   value={manualItemForm.description}
                   onChange={(e) => setManualItemForm((prev) => ({ ...prev, description: e.target.value }))}
                   placeholder="Contoh: Penalti kerusakan inventaris"
+
                 />
               </div>
             </div>
