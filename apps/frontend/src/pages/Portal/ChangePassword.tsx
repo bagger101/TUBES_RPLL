@@ -14,7 +14,7 @@ export function ChangePasswordPage({ token, currentUserRole }: ChangePasswordPag
 
   if (currentUserRole === 'admin') {
     return (
-      <section className="panel" style={{ padding: '20px', maxWidth: '480px' }}>
+      <section className="panel" style={{ padding: '20px', maxWidth: '480px', width: '100%', margin: '0 auto' }}>
         <h3 style={{ margin: '0 0 6px' }}>Ubah Password</h3>
         <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
           Akun admin tidak dapat mengubah password dari portal ini.
@@ -75,7 +75,7 @@ export function ChangePasswordPage({ token, currentUserRole }: ChangePasswordPag
   };
 
   return (
-    <section className="panel" style={{ padding: '20px', maxWidth: '480px' }}>
+    <section className="panel" style={{ padding: '20px', maxWidth: '480px', width: '100%', margin: '0 auto' }}>
       <h3 style={{ margin: '0 0 6px' }}>Ubah Password</h3>
       <p style={{ margin: '0 0 20px', fontSize: '13px', color: '#64748b' }}>
         Pastikan password baru Anda minimal 8 karakter.
