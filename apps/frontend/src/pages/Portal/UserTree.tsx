@@ -18,66 +18,24 @@ const ROLE_COLOR: Record<string, { bg: string; border: string; badge: string }> 
   staff: { bg: '#fafafa', border: '#94a3b8', badge: '#475569' },
 };
 
-function getInitials(name: string | null | undefined): string {
-  if (!name) return '?';
-  return name
-    .split(' ')
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? '')
-    .join('');
-}
-
 function UserCard({ user, role }: { user: UserTreeNode; role: 'admin' | 'manager' | 'staff' }) {
   const colors = ROLE_COLOR[role] ?? ROLE_COLOR.staff;
   const name = user.employee?.full_name ?? user.email;
-  const initials = getInitials(user.employee?.full_name);
 
   return (
     <div
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '10px',
+        gap: '0',
         padding: '10px 14px',
         background: colors.bg,
         border: `1.5px solid ${colors.border}`,
         borderRadius: '10px',
-        minWidth: '200px',
-        maxWidth: '260px',
+        minWidth: '170px',
+        maxWidth: '240px',
       }}
     >
-      {user.employee?.photo_url ? (
-        <img
-          src={user.employee.photo_url}
-          alt={name}
-          style={{
-            width: '38px',
-            height: '38px',
-            borderRadius: '50%',
-            objectFit: 'cover',
-            flexShrink: 0,
-            border: `2px solid ${colors.border}`,
-          }}
-        />
-      ) : (
-        <div
-          style={{
-            width: '38px',
-            height: '38px',
-            borderRadius: '50%',
-            background: colors.border,
-            color: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 700,
-            fontSize: '13px',
-            flexShrink: 0,
-          }}
-        >
-          {initials}
-        </div>
-      )}
       <div style={{ overflow: 'hidden' }}>
         <div
           style={{
