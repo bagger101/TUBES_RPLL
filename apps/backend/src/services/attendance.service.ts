@@ -3,6 +3,7 @@ import { Op } from 'sequelize';
 import {
   sequelize,
   Attendance,
+  Department,
   Employee,
   QrToken,
   User,
@@ -98,6 +99,18 @@ class AttendanceService {
           user_id: userId,
           is_active: true,
         },
+        include: [
+          {
+            model: User,
+            as: 'user',
+            attributes: ['id', 'email', 'role'],
+          },
+          {
+            model: Department,
+            as: 'department',
+            attributes: ['id', 'name'],
+          },
+        ],
         transaction,
       });
 
@@ -105,6 +118,7 @@ class AttendanceService {
         throw new NotFoundError('Data karyawan tidak ditemukan');
       }
 
+      // Step 1: Lock row WITHOUT JOIN — PostgreSQL does not allow FOR UPDATE with LEFT OUTER JOIN
       const qrToken = await QrToken.findOne({
         where: {
           token,
@@ -113,20 +127,6 @@ class AttendanceService {
         },
         transaction,
         lock: transaction.LOCK.UPDATE,
-        include: [
-          {
-            model: User,
-            as: 'scanner',
-            attributes: ['id'],
-            include: [
-              {
-                model: Employee,
-                as: 'employee',
-                attributes: ['id', 'full_name'],
-              },
-            ],
-          },
-        ],
       }) as any;
 
       if (!qrToken) {
@@ -135,8 +135,19 @@ class AttendanceService {
 
       // Feature: 1 QR = 1 person only
       if (qrToken.scanned_by && qrToken.scanned_by !== userId) {
-        const scannerUser = qrToken.get('scanner') as any | null;
-        const scannedByName = scannerUser?.employee?.full_name || 'staff lain';
+        // Step 2: Fetch scanner name separately (no lock needed here)
+        let scannedByName = 'staff lain';
+        try {
+          const scannerEmployee = await Employee.findOne({
+            where: { user_id: qrToken.scanned_by },
+            attributes: ['full_name'],
+          });
+          if (scannerEmployee) {
+            scannedByName = scannerEmployee.getDataValue('full_name') || scannedByName;
+          }
+        } catch {
+          // ignore, fallback name is fine
+        }
         throw new AppError(
           `QR ini sudah digunakan oleh ${scannedByName} sebelumnya`,
           409,

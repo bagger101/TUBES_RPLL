@@ -21,6 +21,17 @@ export interface AttendanceScanResult {
     id: string;
     full_name: string;
     employee_number: string;
+    job_title: string | null;
+    photo_url: string | null;
+    department?: {
+      id: string;
+      name: string;
+    } | null;
+    user?: {
+      id: string;
+      email: string;
+      role: 'admin' | 'staff' | 'manager';
+    } | null;
   };
   qrToken: AdminAttendanceQrCode;
 }

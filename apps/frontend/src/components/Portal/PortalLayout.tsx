@@ -44,7 +44,7 @@ export function PortalLayout({
   const canManageAttendanceQr = currentUser.user.role === 'admin';
   const canManagePayroll = currentUser.user.role === 'admin';
   const canViewMyPayroll = Boolean(currentUser.employee);
-  const canScanAttendance = currentUser.user.role === 'staff' || currentUser.user.role === 'manager';
+  const canScanAttendance = currentUser.user.role === 'staff' || currentUser.user.role === 'manager' || currentUser.user.role === 'admin';
 
   const defaultProfilePhoto = '/images/default-profile.svg';
   const headerProfilePhotoSrc = currentUser.employee?.photo_url?.startsWith('http')

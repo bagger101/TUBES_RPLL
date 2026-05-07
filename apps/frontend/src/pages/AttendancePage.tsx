@@ -43,7 +43,7 @@ export function AttendancePage({ currentUser, activeAttendanceView }: Attendance
 
   const token = auth.getToken();
   const canManageAttendanceQr = currentUser.user.role === 'admin';
-  const canScanAttendance = currentUser.user.role === 'staff' || currentUser.user.role === 'manager';
+  const canScanAttendance = currentUser.user.role === 'staff' || currentUser.user.role === 'manager' || currentUser.user.role === 'admin';
 
   const loadAttendanceQr = async (forceRefresh = false) => {
     if (!canManageAttendanceQr || !token) {
@@ -160,12 +160,17 @@ export function AttendancePage({ currentUser, activeAttendanceView }: Attendance
   }
 
   if (activeAttendanceView === 'scan' && canScanAttendance) {
+    const isAdmin = currentUser.user.role === 'admin';
     return (
       <section className="panel scanner-panel">
         <div className="section-head">
           <div>
             <h3>Scan QR Absensi</h3>
-            <p className="subtext">Scan QR absensi yang ditampilkan admin untuk mencatat kehadiran Anda.</p>
+            <p className="subtext">
+              {isAdmin
+                ? 'Scan QR karyawan untuk verifikasi dan mencatat kehadiran.'
+                : 'Scan QR absensi yang ditampilkan admin untuk mencatat kehadiran Anda.'}
+            </p>
           </div>
         </div>
 
