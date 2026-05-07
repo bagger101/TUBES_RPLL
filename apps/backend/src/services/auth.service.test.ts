@@ -260,9 +260,13 @@ describe('AuthService', () => {
         update: jest.fn().mockResolvedValue({}),
       };
 
-      const mockUser = {
-        update: jest.fn().mockResolvedValue({}),
-      };
+      const mockUser = makeMockUser({
+        id: 'user-1',
+        email: 'user-1@example.com',
+        role: 'staff',
+        is_active: true,
+        employee: null,
+      });
 
       jest.spyOn(PasswordResetToken, 'findOne').mockResolvedValue(mockToken as any);
       jest.spyOn(User, 'findByPk').mockResolvedValue(mockUser as any);
@@ -426,12 +430,14 @@ describe('AuthService', () => {
   describe('changePassword', () => {
     it('throws error when admin tries to change password', async () => {
       jest.spyOn(User, 'unscoped').mockReturnValue({
-        findByPk: jest.fn().mockResolvedValue({
+        findByPk: jest.fn().mockResolvedValue(makeMockUser({
           id: 'admin-1',
+          email: 'admin@example.com',
           password_hash: '$2b$10$IfFQaAy6W6KbIOcvFKYh4u.fkxXd21qrLsYxWblA3UXYFTw7/uWPq',
           role: 'admin',
           is_active: true,
-        }),
+          employee: null,
+        })),
       } as any);
 
       await expect(
